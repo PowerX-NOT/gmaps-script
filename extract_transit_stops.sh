@@ -8,16 +8,12 @@
 
 set -euo pipefail
 
-if [ "$#" -lt 2 ]; then
-  echo "Usage: $0 <input_transit_lines_json> <output_stops_json>" >&2
-  exit 1
-fi
-
-IN="$1"
-OUT="$2"
+IN="${1:-transit_lines.json}"
+OUT="${2:-transit_stops_last.json}"
 
 if [ ! -f "$IN" ]; then
   echo "Input file not found: $IN" >&2
+  echo "Usage: $0 [input_transit_lines_json] [output_stops_json]" >&2
   exit 1
 fi
 

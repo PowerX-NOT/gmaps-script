@@ -21,18 +21,14 @@
 
 set -euo pipefail
 
-if [ "$#" -lt 2 ]; then
-  echo "Usage: $0 <input_raw_or_clean_json> <output_text> [output_clean_json] [output_schedule_json]" >&2
-  exit 1
-fi
-
-IN="$1"
-OUT="$2"
-CLEAN_OUT="${3:-}"
-SCHEDULE_JSON_OUT="${4:-}"
+IN="${1:-response.json}"
+OUT="${2:-bus_schedule.txt}"
+CLEAN_OUT="${3:-clean_response.json}"
+SCHEDULE_JSON_OUT="${4:-bus_schedule.json}"
 
 if [ ! -f "$IN" ]; then
   echo "Input file not found: $IN" >&2
+  echo "Usage: $0 [input_raw_or_clean_json] [output_text] [output_clean_json] [output_schedule_json]" >&2
   exit 1
 fi
 
