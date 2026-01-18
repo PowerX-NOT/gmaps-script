@@ -1,6 +1,6 @@
 #!/bin/bash
 
-URL="https://www.google.com/maps/rpc/transit/lines?gl=in&pb=!1m5!7e140!9s4HVsadHhFYXYseMPp6WpQQ%3A933925486775!17s4HVsadHhFYXYseMPp6WpQQ%3A933925486776!24m1!2e1!2m4!1s0x3bae6b6cce624449%3A0x6a0e2b4dbae58776!2s0x3bae6c6c917e3951%3A0xda5bf6ad89b2b656!4j1768724046!5sbABDwibLLBiDtFCnipbvtLN2-TQ%3D%3D!3m3!2m2!3e1!3e0"
+URL="https://www.google.com/maps/rpc/transit/lines?gl=in&pb=!1m5!7e140!9s6Htsaen6B9iaseMP5Oul-Ao%3A59399209619!17s6Htsaen6B9iaseMP5Oul-Ao%3A59399209620!24m1!2e1!2m4!1s0x3bae6c1ab9e76771%3A0x41b146e690392afc!2s0x3bae6c6c917e3951%3A0x1c8bc9f48f1b9304!4j1768717958!5sbABDk9LHLBiDtFCmfKG3C3PAxBg%3D%3D!3m3!2m2!3e1!3e0"
 
 OUTPUT="transit_lines.json"
 
