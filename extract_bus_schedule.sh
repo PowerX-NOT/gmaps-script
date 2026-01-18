@@ -2,7 +2,7 @@
 #
 # extract_bus_schedule.sh
 # Usage:
-#   ./extract_bus_schedule.sh response.json bus_schedule.txt [clean_response.json]
+#   ./extract_bus_schedule.sh response.json bus_schedule.txt [clean_response.json] [bus_schedule.json]
 #
 # Reads a Google Maps JSON response (with or without XSSI prefix ")]}'") and extracts
 # a human-readable bus timetable for the nearby stop (e.g. Jigani APC Circle)
@@ -22,13 +22,14 @@
 set -euo pipefail
 
 if [ "$#" -lt 2 ]; then
-  echo "Usage: $0 <input_raw_or_clean_json> <output_text> [output_clean_json]" >&2
+  echo "Usage: $0 <input_raw_or_clean_json> <output_text> [output_clean_json] [output_schedule_json]" >&2
   exit 1
 fi
 
 IN="$1"
 OUT="$2"
 CLEAN_OUT="${3:-}"
+SCHEDULE_JSON_OUT="${4:-}"
 
 if [ ! -f "$IN" ]; then
   echo "Input file not found: $IN" >&2
@@ -40,7 +41,7 @@ if ! command -v python3 >/dev/null 2>&1; then
   exit 1
 fi
 
-python3 - << 'PY' "$IN" "$OUT" "$CLEAN_OUT"
+python3 - << 'PY' "$IN" "$OUT" "$CLEAN_OUT" "$SCHEDULE_JSON_OUT"
 import json
 import sys
 from typing import Any, List, Tuple
@@ -50,6 +51,9 @@ out_path = sys.argv[2]
 
 # Optional third arg: where to write a pretty "clean" JSON
 clean_out_path = sys.argv[3] if len(sys.argv) > 3 else ""
+
+# Optional fourth arg: where to write a structured schedule JSON
+schedule_json_out_path = sys.argv[4] if len(sys.argv) > 4 else ""
 
 with open(in_path, 'r', encoding='utf-8') as f:
     raw = f.read()
@@ -301,10 +305,31 @@ with open(out_path, 'w', encoding='utf-8') as out:
     for route, stop, time_str in unique_records:
         out.write(f"Bus {route}\t{stop}\t{time_str}\n")
 
+if schedule_json_out_path:
+    schedule = {
+        "place": place_name,
+        "buses": unique_routes,
+        "timetable": [
+            {
+                "mode": "Bus",
+                "route": route,
+                "towords": stop,
+                "time": time_str,
+            }
+            for route, stop, time_str in unique_records
+        ],
+    }
+    with open(schedule_json_out_path, 'w', encoding='utf-8') as sf:
+        json.dump(schedule, sf, ensure_ascii=False, indent=2)
+
 PY
 
 echo "Bus schedule written to: $OUT"
 
 if [ -n "${CLEAN_OUT}" ]; then
   echo "Clean JSON written to: ${CLEAN_OUT}"
+fi
+
+if [ -n "${SCHEDULE_JSON_OUT}" ]; then
+  echo "Schedule JSON written to: ${SCHEDULE_JSON_OUT}"
 fi
