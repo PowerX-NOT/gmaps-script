@@ -3,6 +3,7 @@
 # extract_bus_schedule.sh
 # Usage:
 #   ./extract_bus_schedule.sh response.json bus_schedule.txt [clean_response.json] [bus_schedule.json]
+#   ./extract_bus_schedule.sh PLACE_ID bus_schedule.txt [clean_response.json] [bus_schedule.json]
 #
 # Reads a Google Maps JSON response (with or without XSSI prefix ")]}'") and extracts
 # a human-readable bus timetable for the nearby stop (e.g. Jigani APC Circle)
@@ -21,14 +22,80 @@
 
 set -euo pipefail
 
-IN="${1:-response.json}"
-OUT="${2:-bus_schedule.txt}"
-CLEAN_OUT="${3:-clean_response.json}"
+# Load local .env if present (do not commit .env)
+if [ -f .env ]; then
+  while IFS='=' read -r key value || [ -n "${key:-}" ]; do
+    [ -z "${key}" ] && continue
+    key="${key%$'\r'}"
+    value="${value%$'\r'}"
+    case "$key" in
+      \#*) continue ;;
+      GOOGLE_API_KEY|PLACE_ID|ORIGIN|DESTINATION|OUTPUT_DIRECTIONS) ;;
+      *) continue ;;
+    esac
+    value="${value%\"}"
+    value="${value#\"}"
+    export "$key=$value"
+  done < .env
+fi
+
+IN_OR_PLACE_ID="${1:-${PLACE_ID:-response.json}}"
+OUT="${2:-}"
+CLEAN_OUT="${3:-}"
 SCHEDULE_JSON_OUT="${4:-bus_schedule.json}"
+
+# If the first argument is not an existing file, treat it as a Place ID and fetch response.json.
+IN="$IN_OR_PLACE_ID"
+if [ ! -f "$IN" ]; then
+  PLACE_ID="$IN_OR_PLACE_ID"
+  if [ -z "$PLACE_ID" ]; then
+    echo "Usage: $0 [input_raw_or_clean_json | PLACE_ID] [output_text] [output_clean_json] [output_schedule_json]" >&2
+    exit 1
+  fi
+
+  if [ -z "${GOOGLE_API_KEY:-}" ]; then
+    echo "Error: GOOGLE_API_KEY is required (set it in .env or environment)." >&2
+    exit 1
+  fi
+
+  # 1) Get CID from Place Details
+  PLACE_JSON=$(curl -sS "https://maps.googleapis.com/maps/api/place/details/json?place_id=${PLACE_ID}&fields=url&key=${GOOGLE_API_KEY}")
+  CID=$(python3 - <<'PY' "$PLACE_JSON"
+import json, re, sys
+try:
+    d = json.loads(sys.argv[1])
+except Exception:
+    print("")
+    raise SystemExit(0)
+url = ""
+try:
+    url = d.get('result', {}).get('url', '')
+except Exception:
+    url = ""
+m = re.search(r'cid=(\d+)', url)
+print(m.group(1) if m else "")
+PY
+)
+
+  if [ -z "$CID" ]; then
+    echo "Failed to get CID for PLACE_ID=$PLACE_ID" >&2
+    exit 2
+  fi
+
+  # 2) Fetch internal Maps JSONP (works with API key but may be limited by Google)
+  JSONP=$(curl -sS "https://maps.googleapis.com/maps/api/js/jsonp/ApplicationService.GetEntityDetails?pb=!1m2!1m1!4s${CID}!2m2!1sen-IN!2sUS&callback=cb&key=${GOOGLE_API_KEY}")
+
+  # 3) Strip JSONP wrapper and save raw JSON
+  echo "$JSONP" \
+    | sed -E 's/^\/\*\*\/cb\s*&&\s*cb\((.*)\);?$/\1/' \
+    > response.json
+
+  IN="response.json"
+fi
 
 if [ ! -f "$IN" ]; then
   echo "Input file not found: $IN" >&2
-  echo "Usage: $0 [input_raw_or_clean_json] [output_text] [output_clean_json] [output_schedule_json]" >&2
+  echo "Usage: $0 [input_raw_or_clean_json | PLACE_ID] [output_text] [output_clean_json] [output_schedule_json]" >&2
   exit 1
 fi
 
@@ -77,6 +144,22 @@ def extract_place_name(root: Any) -> str:
     """
     def walk(n: Any) -> str:
         if isinstance(n, list):
+            # Common top-of-response place header pattern (observed in clean_response.json):
+            #   [ ["0x...", "<address>", [<lat>, <lng>], ...], "<place name>", ...]
+            if (
+                len(n) >= 2
+                and isinstance(n[0], list)
+                and isinstance(n[1], str)
+                and len(n[0]) >= 3
+                and isinstance(n[0][0], str)
+                and isinstance(n[0][1], str)
+                and isinstance(n[0][2], list)
+                and len(n[0][2]) >= 2
+                and isinstance(n[0][2][0], (int, float))
+                and isinstance(n[0][2][1], (int, float))
+            ):
+                return n[1]
+
             if (
                 len(n) >= 4
                 and isinstance(n[0], str)
@@ -281,30 +364,27 @@ for r in records:
 
 # Extract unique routes (prefer the dedicated "Buses" section if present)
 route_seen = set()
-unique_routes: List[str] = []
-
+text_lines: List[str] = []
+text_lines.append(place_name)
+text_lines.append("Buses")
 for r in routes_from_buses_section:
+    text_lines.append(r)
     if r not in route_seen:
         route_seen.add(r)
-        unique_routes.append(r)
-
 for route, _stop, _time_str in unique_records:
     if route not in route_seen:
         route_seen.add(route)
-        unique_routes.append(route)
+        text_lines.append(route)
+    text_lines.append(f"Bus {route}\t{_stop}\t{_time_str}")
 
-with open(out_path, 'w', encoding='utf-8') as out:
-    out.write(f"{place_name}\n")
-    out.write('Buses\n')
-    for route in unique_routes:
-        out.write(f"{route}\n")
-    for route, stop, time_str in unique_records:
-        out.write(f"Bus {route}\t{stop}\t{time_str}\n")
+if out_path:
+    with open(out_path, 'w', encoding='utf-8') as f:
+        f.write("\n".join(text_lines) + "\n")
 
 if schedule_json_out_path:
-    schedule = {
+    schedule_out = {
         "place": place_name,
-        "buses": unique_routes,
+        "buses": routes_from_buses_section,
         "timetable": [
             {
                 "mode": "Bus",
@@ -315,17 +395,17 @@ if schedule_json_out_path:
             for route, stop, time_str in unique_records
         ],
     }
-    with open(schedule_json_out_path, 'w', encoding='utf-8') as sf:
-        json.dump(schedule, sf, ensure_ascii=False, indent=2)
+    with open(schedule_json_out_path, 'w', encoding='utf-8') as jf:
+        json.dump(schedule_out, jf, ensure_ascii=False, indent=2)
 
 PY
 
-echo "Bus schedule written to: $OUT"
-
-if [ -n "${CLEAN_OUT}" ]; then
-  echo "Clean JSON written to: ${CLEAN_OUT}"
+if [ -n "$OUT" ]; then
+  echo "Bus schedule written to: $OUT"
 fi
-
-if [ -n "${SCHEDULE_JSON_OUT}" ]; then
-  echo "Schedule JSON written to: ${SCHEDULE_JSON_OUT}"
+if [ -n "$CLEAN_OUT" ]; then
+  echo "Clean JSON written to: $CLEAN_OUT"
+fi
+if [ -n "$SCHEDULE_JSON_OUT" ]; then
+  echo "Schedule JSON written to: $SCHEDULE_JSON_OUT"
 fi
